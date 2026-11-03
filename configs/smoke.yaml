@@ -1,0 +1,31 @@
+# Fast end-to-end smoke configuration (spec §12.2). Not for any reported result.
+study_id: neurosculpt_smoke
+frozen: false
+
+model:
+  arch: mlp
+  hidden: [128, 64]
+  activation: relu
+  base_seeds: [0]
+
+data:
+  base: mnist
+  corruption: shot_noise
+  split_by: original_image_id
+  edit_search: {target: 64, preserve: 64}
+
+edit:
+  parameter_name: layers.1.weight
+  k: 4
+  d: 4
+  radius_fracs: [0.03]
+
+search:
+  optimizer: coordinate
+  max_candidates: 32
+  localization_prescreen: 8
+
+methods:
+  - {code: BASE}
+  - {code: RAND,        support: random, basis: random}
+  - {code: NEUROSCULPT, support: causal, basis: behavior}
