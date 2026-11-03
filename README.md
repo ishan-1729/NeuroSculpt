@@ -97,4 +97,9 @@ python scripts/run_smoke.py --config configs/smoke.yaml
 ## Data
 
 MNIST and MNIST-C are downloaded by script from their original sources and never committed.
-Check their license terms before any redistribution or compensated use.
+MNIST-C data is CC BY 4.0 (attribution required); its generation code is Apache-2.0.
+
+## License
+
+Code and documentation in this repository are released under the [MIT License](LICENSE).
+Datasets keep their own licenses.
