@@ -1,4 +1,4 @@
-"""Editable-support selection: random S0, activation-contrast S1, causal restoration S2 (spec §5)."""
+"""Activation-contrast (S1) and causal-restoration (S2) localization for the labeled CMA-S1/S2 arms (spec §6.2)."""
 
 from __future__ import annotations
 

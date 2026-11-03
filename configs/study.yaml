@@ -1,0 +1,126 @@
+# Pre-registration for the study (spec §3-§8).
+# STATUS: DRAFT. Values are proposed design choices, not results. Freeze (set frozen: true,
+# record the commit hash, post publicly with a timestamp) at the end of P2, before any
+# analysis seed is run. Fields marked null are filled by the P0-P2 pilots on calibration seeds.
+study_id: neurosculpt
+spec_version: "1.0"
+frozen: false
+
+target_model:
+  sizes: [49, 24, 16, 10]
+  input: {source: mnist, downsample: avg_pool2d, kernel: 4, range: [0, 1]}
+  min_clean_acc: 0.90
+seeds:
+  analysis: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  calibration: [100, 101, 102]     # pilots, comparator and envelope selection only
+  extra_seed_rule: {max_added: 4, trigger: "upper 80% CI of pilot SD gives MDE > SESOI"}
+
+splits:
+  base_train_ids: 50000
+  heldout_ids: 10000                 # calibration + adaptation + selection = 10,000
+  calibration: {ids: 4000, halves: [severity_and_affected_classes, lambda_and_labeled_arms]}
+  adaptation: {ids: 1000}
+  selection: {ids: 5000, min_per_class: 500}
+  sealed_test: official_mnist_test
+  split_by: original_image_id
+
+task_a:                            # planted damage in W2 (16 x 24)
+  families: [F1_sign_flip_rowset_x_colset, F2_column_noise_norm_matched, F3_fullrank_8x8_rowset_x_colset, F4_stealth_balance_matched]
+  site_sampling: uniform_any_contiguity   # F4: uniform within eligible sets; permutation-equivariant
+  severity_target_drop_pp: 25           # F1-F3; F4 rejection-samples eligible sets with drop in band
+  severity_band_pp: [15, 40]            # moved only to meet the identifiability bound
+  affected_class_min_drop_pp: 5
+  min_affected_classes: 2
+  in_pool_rule: ceil_half               # the rest (>= 1) are held out for H8
+  f4_eligibility: {pairwise_in_and_out_log_norm_tau: null, min_eligible_sets: 20}
+  denominator_floor_pp: 5
+  p1_checks: {report_only_best_blackbox_at_b64: [0.15, 0.70], identifiability_at_4096_min: 0.80, families_required: 3,
+              balance_match_max_on_F4: 0.20, oracle_gate_pass_min: {applies_to: [delta_star, CMA-ORACLE], rate: 0.95}}
+task_b:
+  corruption: null                 # non-geometric MNIST-C, 5-30 pp drop, seed-stable; chosen on calibration
+  source: zenodo_3239543           # CC BY 4.0; pin the zip by SHA-256
+  mnist_c_sha256: null
+  clean_views: identity
+  ceiling: ADAM-PATCH
+
+disclosure:
+  layer_hint_task_a: W2
+  family_library: [sign_flips, column_noise_replacement, submatrix_noise, column_permutation]
+  family_identity_disclosed: false
+  per_class_acc_disclosed: true
+
+api:
+  calls: [evaluate, evaluate_batch, forward]   # forward: the arm's own presented view, unpatched
+  returns: [target_ce, target_acc, per_class_acc, preserve_kl]
+  fbe_per_evaluate: 1
+  patch_language: [layers.1.weight, layers.1.bias, layers.2.weight, layers.2.bias]  # W2, b2, W3, b3
+  index_only_operators: [column_set_permutation, rowset_x_colset_sign_flip, column_set_zero]  # on W2, for every arm
+  adaptation_batch: {target: 256, preserve: 512}
+  sandbox_cpu_seconds: 600         # code-tool budget per LLM-W-family session; LLM-W-nosynth has no code tool
+
+llm:
+  M1: {model_id: null, effort: null, thinking: null, thinking_display: summarized, max_tokens: null, api_version: null, date_pinned: null}
+  M2: {model_id: null, effort: null, thinking: null, max_tokens: null, api_version: null, date_pinned: null}
+  number_format: 4_significant_digits_per_row_exponent
+  presentation: fresh_permutation_both_hidden_layers
+  canonical_order: [layer_0, layer_1]
+  rescale_log_uniform: [0.25, 4.0]
+  final_candidates_exact: 3       # padded with zero patches
+  per_session_caps: {turns: 40, output_tokens: null, context_tokens: null}
+  prompt_caching: required
+  concurrency: 4
+  infra_failure: {resume_from_last_turn: true, restart_only_before_first_evaluate: true, max_resumptions: 3}
+  failed_session_score: zero_R
+  run_order: randomized_interleaved
+  sessions:                        # spec §8.2; 1,380 in total
+    - {model: M1, task: A, arms: [LLM-W], budgets: [0, 16, 64], samples: 3}
+    - {model: M1, task: A, arms: [LLM-noW], budgets: [16, 64], samples: 3}
+    - {model: M1, task: A, arms: [LLM-wrongW, LLM-W-nosynth, LLM-W-rescale, LLM-W-canon, LLM-W-strip, LLM-noW-strip], budgets: [64], samples: 2}
+    - {model: M1, task: B, arms: [LLM-W, LLM-noW], budgets: [64], samples: 3}
+    - {model: M2, task: A, arms: [LLM-W, LLM-noW], budgets: [64], samples: 3}
+  spending_cap_usd: null           # P2 per-template billed cost x session table (incl. reserved seeds) x 1.25
+
+search:
+  pure_blackbox_arms: [CMA-FULL, CMA-SUB, RANDOM, TEMPLATE-SEARCH, LOGIT-BIAS]   # comparator-eligible
+  greybox_arms: [CMA-NORM, CMA-PCA, TEMPLATE-STAT, ELIGIBLE-ENUM]                  # read weights; ineligible
+  labeled_arms: [CMA-S1, CMA-S2]                                                   # reported, ineligible
+  hybrids: {arms: [HYB-SUPPORT, HYB-TEMPLATE], budget_fbe: 64}
+  curve_budgets_fbe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+  null_restarts: 200
+  subspace_d: 8
+  cma_popsize: {rule: max_4_floor_q_over_4, min_budget: 16}   # q < 16 runs as RANDOM
+  lambda_kl: null
+  primary_comparator: null         # best pure black-box arm at b = 64 by calibration selection-split R (P1)
+  envelope: null                   # best pure black-box arm per budget, frozen in P1
+  template_extractor_residual_threshold: null
+
+baselines: [ZERO, NORM-RENORM, SVD-REMOVE, BALANCE-MATCH, LASTLAYER]
+ceilings: [CMA-ORACLE, ADAM-PATCH, FULL-FT]
+
+selection:
+  ledger: separate_identical_for_all_arms   # not counted in b
+  candidates_exact: 3
+  gate_task_a: {metric: pooled_unaffected_class_acc, max_drop_pp: 1.0, bound: one_sided_95_paired_bootstrap}
+  gate_task_b: {metric: clean_acc, max_drop_pp: 0.5, bound: one_sided_95_paired_bootstrap}
+  choose_by: raw_selection_acc_in_pool_affected
+  improve_margin_pp: null          # for NO_IMPROVING_EDIT
+
+primary_contrast: {arm: LLM-W, model: M1, versus: primary_comparator, budget_fbe: 64, task: A,
+                   metric: sealed_test_R_in_pool_affected}
+statistics:
+  unit: analysis_seed
+  test: exact_wilcoxon_one_sided
+  alpha: 0.05
+  sesoi_pp: 10
+  ci: family_stratified_seed_bootstrap_bca_95
+  sensitivity: mixed_model_family_fixed_seed_and_seed_x_family_random_samples_nested
+  confirmatory_secondary: [H2, H3a, H3b, H3c, H4b, H5]   # one p-value each; m = 6
+  multiplicity: holm
+  h2_p_value: seed_cluster_bootstrap_one_sided_vs_128
+  intersection_union: [H3c, H4b]   # max of component p-values
+  gatekeeping: {H5: H3a}           # untested H5 counts as not rejected
+  h4b_budgets: {matched: 64, heuristics: 0}
+  estimation_only: [H4a, H6, H7, H8]
+  tost_margin_pp: 5                # only where the power check shows it is attainable
+  q_star: {per_cell: true, isotonic: pava, interpolation: log2_linear, censor_at: 4096, aggregate: pooled_km_median_seed_cluster_bootstrap}
+  h8: {canonicalize: [h2_orbit, flat_direction_projection], primary_matching: gain_stratified_restarts_5pp, sensitivity: envelope_nearest_grid_q_uncensored}

@@ -1,0 +1,92 @@
+# Pre-registration for the main study (spec v1.1 §3, §8, §9, §10, §12).
+# STATUS: DRAFT. Values are proposed design choices, not results. Freeze (set frozen: true and
+# record the commit hash) before any sealed-test evaluation; log later deviations in
+# docs/research_decisions.md. Fields marked null are filled by the P0 pilots (spec §8.3).
+study_id: neurosculpt_v1
+spec_version: "1.1"
+frozen: false
+
+model:
+  arch: mlp
+  hidden: [128, 64]
+  activation: relu
+  base_seeds: [0, 1, 2, 3, 4, 5]   # >= 6 required; extend to 10 if time allows
+  base_train_ids: 50000            # MNIST-train IDs used for base training only
+
+data:
+  base: mnist
+  source: zenodo_3239543           # MNIST-C, CC BY 4.0; pin the zip by SHA-256
+  mnist_c_sha256: null
+  clean_views: identity            # clean views from MNIST-C identity/ (pairing audit)
+  corruption: null                 # set by the headroom pilot; non-geometric only
+  transfer_corruption: null        # unoptimized family for interference check
+  split_by: original_image_id
+  heldout_ids: 10000               # held out before base training
+  calibration: {ids: 1024}         # paired clean + corrupted views
+  edit_search: {target: 256, preserve: 512}
+  edit_selection: {target: 2000, preserve: 2000}
+  labeled_data_policy: shared_calibration   # data-free arms append calibration to search
+
+pilots:
+  headroom: {corruptions: all_15, drop_pp_range: [5, 30], exclude_geometric: true}
+  edit_site: {sites: [W2_cols, b1, W1_rows, W3], method: adam_mask}
+
+edit:
+  parameter_name: layers.1.weight  # W2, shape [64, 128]
+  k: 8
+  d: 8
+  radius_fracs: [0.01, 0.03, 0.10, 0.30]  # rho / ||W2[:, S]||_F; Task A extends to the damage ratio
+
+objective:
+  lambda_ce: null                  # tuned on edit_selection only
+  lambda_kl: 0.0                   # K_P is second order at theta_0; tune one coefficient only
+  mu: null
+  preserve_gate_pp: 0.5            # one-sided 95% paired-bootstrap upper bound on the drop
+  improve_margin_ce: null          # delta for NO_IMPROVING_EDIT
+
+search:
+  optimizer: cmaes                 # primary (rotation-invariant); coordinate is secondary
+  cmaes_sigma0_frac_of_rho: 0.5
+  optimizer_seeds: 5
+  budget_full_batch_equiv: 240     # end-to-end: localization, basis, sweep, selection included
+  fbe_meq: 768                     # 1 FBE = 768 model-example queries; partial forward = 1 query
+  localization_prescreen: 32
+  selection_top_k: 5
+  converged_reference_queries: 5000  # harness-only diagnostic
+
+nulls:
+  draws_per_seed: 200              # per random component (S0 supports, B0 and B0-u bases)
+
+methods:                           # spec §9.1
+  - {code: BASE}
+  - {code: RAND,          support: random,   basis: random}
+  - {code: RAND-U,        support: random,   basis: random_u}
+  - {code: SPEC,          support: random,   basis: spectral}
+  - {code: BEHAV,         support: random,   basis: behavior}
+  - {code: CONTRAST-RAND, support: contrast, basis: random}
+  - {code: CAUS-RAND,     support: causal,   basis: random}
+  - {code: CAUS-U,        support: causal,   basis: random_u}
+  - {code: CAUS-SPEC,     support: causal,   basis: spectral}
+  - {code: NEUROSCULPT,   support: causal,   basis: behavior}
+  - {code: FULL-SUPPORT,  support: [random, causal], basis: raw, optimizer: sep_cmaes}
+
+baselines:
+  - {code: LSQ-EDIT,   queries: 0}
+  - {code: MEAN-SHIFT, queries: 0}
+  - {code: LOGIT-BIAS, optimizer: cmaes}
+  - {code: LASTLAYER,  queries: 0}
+  - {code: ADAM-MASK,  support: every, optimizer: adam}
+  - {code: FULL-FT,    optimizer: adam}
+  - {code: ADAM-BASIS, basis: every, harness_only: true}
+
+contrasts:                         # spec §3; NEUROSCULPT vs RAND is descriptive only
+  H1a: {primary: [NEUROSCULPT, CAUS-RAND], secondary: [BEHAV, RAND]}
+  H1b: [NEUROSCULPT, CAUS-U]
+  H2:  {basis_fixed: [CAUS-RAND, RAND], adam_mask: [causal, random]}
+statistics:
+  sesoi_pp: 0.5
+  tost_margin_pp: 0.5
+  test: wilcoxon_one_sided
+  alpha: 0.05
+  multiplicity: holm               # across H1a, H1b, H2
+  ci: hierarchical_bootstrap_95

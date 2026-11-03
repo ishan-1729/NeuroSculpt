@@ -1,18 +1,20 @@
 import pytest
 
-from neurosculpt.metrics import edit_gain_pp, preservation_drop_pp, repair_fraction
+from neurosculpt.metrics import absolute_gain_pp, gap_closed
 
 
-def test_pp_metrics():
-    assert edit_gain_pp(0.91, 0.90) == pytest.approx(1.0)
-    assert preservation_drop_pp(0.98, 0.975) == pytest.approx(0.5)
+def test_gap_closed_is_unclipped_and_flags_small_denominators():
+    assert gap_closed(0.80, 0.60, 0.90)[0] == pytest.approx(2 / 3)
+    assert gap_closed(0.95, 0.60, 0.90) == (pytest.approx(35 / 30), False)
+    r, flagged = gap_closed(0.62, 0.60, 0.63)
+    assert r == pytest.approx(2 / 3) and flagged
+    assert gap_closed(0.70, 0.60, 0.60) == (0.0, True)
 
 
-def test_repair_fraction():
-    assert repair_fraction(2.0, 1.0, 0.0) == pytest.approx(0.5)
-    assert repair_fraction(1.0, 0.5, 1.0) is None
+def test_absolute_gain_pp():
+    assert absolute_gain_pp(0.91, 0.90) == pytest.approx(1.0)
 
 
-@pytest.mark.skip(reason="P2: objectives.choose_safe_candidate not implemented")
-def test_selection_returns_no_safe_edit_when_gate_fails():
-    """If no candidate passes the preservation gate on selection, keep theta_0 and flag NO_SAFE_EDIT."""
+@pytest.mark.skip(reason="P1: objectives.select_candidate not implemented")
+def test_selection_returns_no_improving_edit_when_nothing_beats_zero():
+    """If no gated candidate beats Delta = 0 by the margin on selection, keep theta_0 (NO_IMPROVING_EDIT)."""

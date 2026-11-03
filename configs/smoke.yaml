@@ -1,31 +1,28 @@
-# Fast end-to-end smoke configuration (spec §12.2). Not for any reported result.
+# Fast end-to-end smoke configuration. Mock LLM, no API calls. Not for any reported result.
 study_id: neurosculpt_smoke
 frozen: false
 
-model:
-  arch: mlp
-  hidden: [128, 64]
-  activation: relu
-  base_seeds: [0]
+target_model:
+  sizes: [49, 24, 16, 10]
+  input: {source: mnist, downsample: avg_pool2d, kernel: 4, range: [0, 1]}
+seeds:
+  calibration: [100]
 
-data:
-  base: mnist
-  corruption: shot_noise
-  split_by: original_image_id
-  edit_search: {target: 64, preserve: 64}
+task_a:
+  families: [F1_sign_flip_rowset_x_colset, F4_stealth_balance_matched]
+  site_sampling: uniform_any_contiguity
 
-edit:
-  parameter_name: layers.1.weight
-  k: 4
-  d: 4
-  radius_fracs: [0.03]
+api:
+  calls: [evaluate, evaluate_batch, forward]
+  patch_language: [layers.1.weight, layers.1.bias, layers.2.weight, layers.2.bias]
+  adaptation_batch: {target: 64, preserve: 64}
+
+llm:
+  backend: mock                    # scripted mock LLM exercises the harness end to end
 
 search:
-  optimizer: coordinate
-  max_candidates: 32
-  localization_prescreen: 8
+  pure_blackbox_arms: [CMA-FULL, RANDOM, TEMPLATE-SEARCH]
+  curve_budgets_fbe: [1, 4, 16, 64]
+  null_restarts: 4
 
-methods:
-  - {code: BASE}
-  - {code: RAND,        support: random, basis: random}
-  - {code: NEUROSCULPT, support: causal, basis: behavior}
+baselines: [ZERO, BALANCE-MATCH]

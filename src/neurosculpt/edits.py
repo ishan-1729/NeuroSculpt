@@ -1,4 +1,4 @@
-"""Support masks, basis matrices and the functional weight patch (spec §4.2, §7.1, §11.2).
+"""Functional weight patches, support masks and subspace bases for CMA-SUB (spec §4.2, §6.2).
 
 Nothing in this module mutates the base parameters.
 """

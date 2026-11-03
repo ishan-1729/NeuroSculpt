@@ -13,15 +13,15 @@ def model():
 
 @pytest.fixture
 def spec():
-    """Random Frobenius-orthonormal basis on k=8 columns of W2, d=8 (test fixture only)."""
+    """Random Frobenius-orthonormal basis on 6 columns of the readable 16 x 24 W2, d=6 (test fixture only)."""
     g = torch.Generator().manual_seed(1)
-    support = (3, 17, 40, 41, 64, 90, 101, 127)
-    q, _ = torch.linalg.qr(torch.randn(64 * len(support), 8, generator=g))
-    basis = torch.zeros(8, 64, 128)
-    basis[:, :, list(support)] = q.T.reshape(8, 64, len(support))
+    support = (1, 5, 9, 14, 20, 23)
+    q, _ = torch.linalg.qr(torch.randn(16 * len(support), 6, generator=g))
+    basis = torch.zeros(6, 16, 24)
+    basis[:, :, list(support)] = q.T.reshape(6, 16, len(support))
     return EditSpec(parameter_name=W2_NAME, support_columns=support, basis=basis, radius=1.0)
 
 
 @pytest.fixture
 def x():
-    return torch.randn(32, 1, 28, 28, generator=torch.Generator().manual_seed(2))
+    return torch.rand(32, 1, 7, 7, generator=torch.Generator().manual_seed(2))

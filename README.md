@@ -1,48 +1,72 @@
 # NeuroSculpt
 
-**Structured, gradient-free weight-space search for targeted neural network repair.**
+**What is reading the weights worth? A ground-truth, budget-matched test of LLM weight-space repair.**
 
 > **Status: pre-implementation.** The research design is in
-> [NeuroSculpt_Research_and_Implementation_Spec.md](NeuroSculpt_Research_and_Implementation_Spec.md)
-> and is under review. No method here has been implemented or validated yet, and nothing in this
-> repository is a reported result. All budgets and thresholds are proposed design choices.
+> [NeuroSculpt_Research_and_Implementation_Spec.md](NeuroSculpt_Research_and_Implementation_Spec.md).
+> No method here has been implemented or validated yet, and nothing in this repository is a reported
+> result. All budgets and thresholds are proposed design choices.
 
 ## Question
 
-Given a frozen trained model and a specific failure, can a small, structured edit
-\(\Delta W(z) = \sum_j z_j B_j\) found **without loss gradients** repair the failure better than an
-equally sized *random* edit, under the same query budget, while leaving unrelated behaviour intact?
+Recent work reports that large language models can read raw neural-network weights and write edits
+that repair the network. NeuroSculpt tests that claim under conditions where it can fail cleanly:
 
-The contribution being tested is **subspace construction**, meaning where to edit (support) and
-which way (basis). It is not zeroth-order optimisation, model editing or locate-then-repair as such,
-since all three are established areas. A carefully run negative result counts as a valid outcome.
+- **Small "readable" target networks.** A 49 → 24 → 16 → 10 MLP on 7×7 MNIST, small enough that its
+  full weights fit in an LLM's context as text.
+- **Planted defects with an exactly known repair** \(\Delta^*\), including a "stealth" defect that
+  leaves every W2-only weight statistic unchanged, with swaps balance-matched so that a cross-layer
+  norm heuristic barely helps.
+- **One metered data channel.** Every method, LLM or search, reaches data only through a counted
+  `evaluate(patch)` API.
+
+We measure whether a pinned LLM with white-box weight access beats the strongest black-box arm at
+the same query budget, and how many queries that access is worth (the exchange rate \(Q^*\), in
+metered-data terms only; LLM sessions cost far more compute, and both costs are reported). The
+black-box arms never read the weights; they include CMA-ES variants and a discrete template search
+that uses index-only operators (swap, sign-flip, zero) available to every arm. Then we test where any
+advantage comes from:
+
+- withholding the weights, or substituting a decoy network's weights;
+- free compute on synthetic inputs, and cheap weight statistics, including a cross-layer
+  norm-balance heuristic;
+- random rescaling and a canonical form of the weights. Every session also sees freshly permuted
+  hidden units;
+- removing semantic priors;
+- handing the LLM's chosen support or extracted edit template to search.
+
+A careful negative result is a full result.
 
 | ID | Hypothesis | Role |
 |---|---|---|
-| H1 | At fixed support, dimension and budget, behaviour-informed bases beat random orthonormal bases on held-out repair gain | Primary |
-| H2 | Causally localised columns beat random columns as editable supports | Secondary |
-| H3 | Preservation terms improve the target-vs-retention Pareto frontier | Secondary |
-| H4 | Gains survive the sealed test and are not class-frequency shifts | Required validity check |
-| H5 | Useful directions are stable across seeds | Optional extension |
+| H1 | At 64 FBE, LLM-with-weights closes ≥ 10 pp more of the recoverable gap than the best black-box arm | Primary |
+| H2 | Weight access is worth more than 128 queries at a 64-query budget (\(Q^*(64) > 128\)) | Confirmatory |
+| H3 | The gain needs the true weights, beats data-free heuristics, and survives without free synthetic compute | Confirmatory |
+| H4 | It is robust to rescaling, and beats trial swaps and heuristics on a balance-matched stealth defect | 4a estimate, 4b confirmatory |
+| H5 | Weights still help after semantic stripping | Confirmatory |
+| H6 | How much of the gain search recovers from the LLM's support or template | Estimate |
+| H7 | Weight-defect vs input-shift advantage | Descriptive |
+| H8 | At matched gain, LLM edits are closer to the true repair (canonicalized) | Estimate |
 
-## Default setting
+## Background
 
-- **Model:** MLP 784 → 128 → 64 → 10, ReLU, no batch norm, trained on MNIST.
-- **Edit site:** second-layer weight matrix \(W_2 \in \mathbb R^{64\times128}\), \(k=8\) columns, \(d=8\) coefficients.
-- **Task A (sanity):** planted, hidden damage to a few \(W_2\) columns.
-- **Task B (main):** one MNIST-C corruption, with the official test split kept sealed.
-- **Methods:** a 2 × 3 grid of supports (random S0, causal S2) × bases (random B0, spectral B1, behaviour B2),
-  coordinate search / CMA-ES with a random-search control, and masked Adam as a gradient-based reference.
+An earlier draft asked whether structured low-dimensional edit bases beat random bases for
+gradient-free repair. No code was written for it. Its [review](docs/spec_review.md) found the question
+narrow, and a [judged brainstorm](docs/research_direction_brainstorm.md) chose the current question.
+The draft is kept for reference in [docs/archive/earlier_draft_spec.md](docs/archive/earlier_draft_spec.md),
+and its reviewed methodology is reused here.
 
 ## Repository layout
 
 ```text
-configs/            study_v1.yaml (pre-registration, DRAFT until frozen), smoke.yaml
-src/neurosculpt/    data, models, edits, localization, directions, objectives,
-                    search, experiment, metrics, plotting
+configs/            study.yaml (pre-registration, DRAFT until frozen), smoke.yaml, archive/
+src/neurosculpt/    models, data, edits, damage, reparam, meter, llm_harness, templates, search, sandbox/,
+                    localization, exchange, objectives, experiment, metrics, plotting
+prompts/            versioned LLM prompts per arm
 scripts/            train_base, make_splits, run_smoke, run_study, summarize
-tests/              zero-edit, no-mutation, mask, orthonormality, leakage, selection, query counter
-docs/               research_decisions.md, experiment_protocol.md, findings.md
+tests/              zero-edit, no-mutation, mask, reparameterization exactness, leakage, selection, meter
+docs/               research_decisions.md, experiment_protocol.md, findings.md, spec_review_2.md (this spec),
+                    spec_review.md (earlier draft), research_direction_brainstorm.md, archive/
 outputs/  data/     machine-generated, git-ignored
 ```
 
@@ -64,34 +88,33 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Planned entry points. They are stubs until their stage lands:
-
-```bash
-python scripts/make_splits.py --config configs/smoke.yaml
-```
+Planned smoke run with a mock LLM and no API calls. The script is a stub until stage P0 lands:
 
 ```bash
 python scripts/run_smoke.py --config configs/smoke.yaml
 ```
 
+LLM API keys are read from environment variables and are never committed or logged.
+
 ## Staged plan
 
 | Stage | Build | Exit gate |
 |---|---|---|
-| P0 | Frozen model, clean/corrupt splits, target and preserve metrics | Base metrics reproduce; test split separated |
-| P1 | Sparse patch, objective, zero-edit and invariance tests | Core unit tests green |
-| P2 | Random basis + coordinate search + safe selection | One complete reproducible run |
-| P3 | Spectral and behaviour bases, causal restoration | Full primary comparison on 1 seed |
-| P4 | All seeds, final test, uncertainty, ablations | Tier 0 and Tier 1 pass |
-| P5 | Optional demo, second task or model | Only if P4 supports it |
+| P0a (week 1) | Readable MLP, splits, damage generator, reparameterization, meter, data-free heuristics | Exactness tests pass; clean accuracy ≥ 90% |
+| P0b (week 2) | Sandbox, LLM harness, template extractor, mock-LLM smoke run | Adversarial leakage test passes |
+| P1 (week 3) | Black-box curves to 4,096 FBE, baselines and ceilings on calibration seeds | Headroom gate holds; comparator and envelope frozen |
+| P2 (week 3) | LLM pilot of every prompt template on calibration seeds | Parse rate ≥ 90% per template; cap set; preregistration frozen and posted |
+| P3 (weeks 4–5) | ~1,380 sessions in randomized order; sealed test opened once | Primary analysis exactly as preregistered |
+| P4 (week 6) | Decomposition, canonicalized repair metrics, write-up | Every hypothesis reported, regardless of sign |
 
 ## Integrity rules
 
-- The proposed search path never uses autograd. Gradient methods are separately labelled baselines.
-- The sealed test is scored **once**, after every choice in `configs/study_v1.yaml` is frozen.
-- In Task A, the injected support and pristine weights are visible only to the evaluation harness.
-- No language model chooses or tunes edits from test feedback. Claude Code writes and debugs code only.
-- Every deviation from the pre-registration is recorded in [docs/research_decisions.md](docs/research_decisions.md).
+- Every arm reaches data only through the metered API. Gradient methods are labelled ceilings only.
+- LLM arms run as automated, preregistered sessions. No human or coding agent steers sessions or picks
+  edits from evaluation feedback. Claude Code writes and debugs code only.
+- Ground truth (\(\Delta^*\), clean weights) is visible only to the evaluation harness.
+- The sealed test is scored **once**, after `configs/study.yaml` is frozen. Deviations are recorded
+  in [docs/research_decisions.md](docs/research_decisions.md).
 - Write-ups label each statement as **PROVEN**, **OBSERVED**, **HYPOTHESIZED** or **UNTESTED**.
 
 ## Data

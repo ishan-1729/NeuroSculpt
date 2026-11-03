@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neurosculpt"
 version = "0.0.1"
-description = "Structured, gradient-free weight-space search for targeted neural network repair"
+description = "A ground-truth, budget-matched test of LLM weight-space repair"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"

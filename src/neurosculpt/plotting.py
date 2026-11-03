@@ -1,4 +1,4 @@
-"""Report figures: Pareto, cost curves, basis comparison, class-wise change (spec §11.4)."""
+"""Report figures: Q* curves, Pareto frontiers, per-family and class-wise plots (spec §7.1, §9.3)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Small model and checkpoint utilities (spec §1.4, §11)."""
+"""Small model and checkpoint utilities (spec §1.4, §9)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,14 @@ import torch
 from torch import Tensor, nn
 
 W2_NAME = "layers.1.weight"
+READABLE_SIZES = (49, 24, 16, 10)  # primary target: weights fit in an LLM context as text
+SECONDARY_SIZES = (784, 128, 64, 10)  # UNTESTED extension; needs its own preregistration (spec §10)
 
 
 class MLP(nn.Module):
-    """784 -> 128 -> 64 -> 10 ReLU MLP with no dropout or batch norm. ``layers.1.weight`` is W2."""
+    """ReLU MLP with no dropout or batch norm; ``layers.1.weight`` is W2."""
 
-    def __init__(self, sizes: tuple[int, ...] = (784, 128, 64, 10)):
+    def __init__(self, sizes: tuple[int, ...] = READABLE_SIZES):
         super().__init__()
         self.layers = nn.ModuleList(nn.Linear(a, b) for a, b in zip(sizes[:-1], sizes[1:]))
 
